@@ -36,7 +36,7 @@ export default function ProductsPage() {
       </section>
 
       <section className="preview-section" id="concept-preview" tabIndex="-1" aria-labelledby="preview-heading">
-        <div className="container"><div className="section-heading preview-section-heading"><div><p className="eyebrow">02 / A look at the idea</p><h2 id="preview-heading">Same wind.<br/><span>A different response.</span></h2></div><p>Change the wind and play the preview to see what we want to explore. These paths illustrate the concept; they aren't test results.</p></div><FlightPreview /></div>
+        <div className="container"><div className="section-heading preview-section-heading"><div><p className="eyebrow">02 / Take it for a flight</p><h2 id="preview-heading">An unexpected gust.<br/><span>A visible correction.</span></h2></div><p>Follow a drone through an obstacle course. Change the wind, add weight, or reduce motor power mid-flight and watch its controller respond.</p></div><FlightPreview /></div>
       </section>
 
       <section className="container section" aria-labelledby="workflow-heading">

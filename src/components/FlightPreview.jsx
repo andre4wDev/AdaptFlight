@@ -1,236 +1,235 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { COURSE, DEFAULT_SETTINGS, createSimulation, getTelemetry, stepSimulation, triggerGust } from '../simulation/flightPhysics.js';
+import './FlightPreview.css';
 
-// These paths are deliberately scripted drawings. They are not flight physics,
-// AI output, or evidence of product performance.
-const WIND_NAMES = ['Calm', 'Light', 'Moderate', 'Strong'];
-const WIND_AMOUNTS = [0, 17, 34, 53];
-const SAMPLE_COUNT = 140;
-const DURATION_MS = 8500;
-const PLANNED_PATH = 'M32 142 Q250 79 468 142';
-const GRID_PATH = 'M32 38H468 M32 82H468 M32 126H468 M32 170H468 M32 214H468 M32 38V214 M119 38V214 M206 38V214 M293 38V214 M380 38V214 M468 38V214';
+const PRESETS = [
+  { name: 'Crosswind', wind: 6, payload: 0, motor: 100 },
+  { name: 'Calm air', wind: 0, payload: 0, motor: 100 },
+  { name: 'Heavy load', wind: 5, payload: 40, motor: 75 },
+];
+const FIXED_STEP = 1 / 120;
+const initialMessage = 'Start the flight, then change the conditions. The drone will try to hold its route through the gates.';
+const number = (value, decimals = 1) => Number.isFinite(value) ? value.toFixed(decimals) : '0';
 
-function pathData(points) {
-  return points.map((point, index) =>
-    `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`
-  ).join(' ');
+function PlayIcon({ paused }) {
+  return <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">{paused ? <path d="M3 2h3v12H3zm7 0h3v12h-3z" /> : <path d="M4 2v12l10-6z" />}</svg>;
 }
 
-function makePoints(windIndex, correction) {
-  return Array.from({ length: SAMPLE_COUNT + 1 }, (_, index) => {
-    const t = index / SAMPLE_COUNT;
-    const plannedY = 142 - 126 * t * (1 - t);
-    // Both panels share the same scripted condition. The smaller offset in the
-    // second panel illustrates the proposed behavior, not a measured benefit.
-    const bend = Math.sin(Math.PI * t);
-    const offset = WIND_AMOUNTS[windIndex] * bend * (
-      0.75 * Math.sin(3.6 * Math.PI * t) + 0.38 * Math.sin(1.4 * Math.PI * t)
-    );
-    return { x: 32 + 436 * t, y: plannedY + offset * correction };
-  });
+function RangeControl({ name, id, value, min, max, unit, low, high, onChange }) {
+  return <div className="sim-range">
+    <label htmlFor={id}><span>{name}</span><output htmlFor={id}>{value}<span> {unit}</span></output></label>
+    <input id={id} type="range" min={min} max={max} step="1" value={value} aria-valuetext={`${value} ${unit}`} onChange={event => onChange(Number(event.target.value))} style={{ '--range-fill': `${(value - min) / (max - min) * 100}%` }} />
+    <div className="sim-range-ends" aria-hidden="true"><span>{low}</span><span>{high}</span></div>
+  </div>;
 }
 
-function progressShape(points, progress) {
-  const step = Math.min(SAMPLE_COUNT, Math.floor(progress * SAMPLE_COUNT));
-  const fraction = progress * SAMPLE_COUNT - step;
-  const current = points[step];
-  const next = points[Math.min(step + 1, SAMPLE_COUNT)];
-  const position = {
-    x: current.x + (next.x - current.x) * fraction,
-    y: current.y + (next.y - current.y) * fraction,
-  };
-  return { position, trail: pathData([...points.slice(0, step + 1), position]) };
-}
-
-function FlightPanel({ adapted, points, progress, windIndex }) {
-  const key = adapted ? 'after' : 'before';
-  const color = adapted ? '#c7f36b' : '#edb29e';
-  const { position, trail } = progressShape(points, progress);
-  const description = windIndex === 0
-    ? `Calm conditions: the scripted ${adapted ? 'green' : 'coral'} path follows the dashed planned path. This is an illustration, not a measured flight.`
-    : adapted
-      ? `The same ${WIND_NAMES[windIndex].toLowerCase()} wind setting is selected. A scripted green path stays closer to the same dashed planned path to illustrate the proposed corrections. This is not an AI result.`
-      : `${WIND_NAMES[windIndex]} wind is selected. A scripted coral path drifts from the dashed planned path. This is an illustration, not a measured flight.`;
-
-  return (
-    <section className="flight-panel" aria-labelledby={`preview-${key}-heading`}>
-      <div className="flight-heading">
-        <h3 id={`preview-${key}-heading`}>
-          {adapted ? 'With proposed adaptation' : 'Without proposed adaptation'}
-        </h3>
-        <span className="mono">{adapted ? 'GREEN PATH' : 'CORAL PATH'}</span>
-      </div>
-      <svg
-        className="flight-chart"
-        viewBox="0 0 500 250"
-        role="img"
-        aria-labelledby={`preview-${key}-title preview-${key}-description`}
-      >
-        <title id={`preview-${key}-title`}>
-          {adapted ? 'A scripted path illustrating the proposed corrections' : 'A scripted path without the proposed corrections'}
-        </title>
-        <desc id={`preview-${key}-description`}>{description}</desc>
-        <path d={GRID_PATH} fill="none" stroke="#e9eee9" strokeOpacity="0.07" strokeWidth="1" aria-hidden="true" />
-        <path d={PLANNED_PATH} fill="none" stroke="#e9eee9" strokeOpacity="0.68" strokeWidth="2" strokeDasharray="6 7" />
-        <path d={pathData(points)} fill="none" stroke={color} strokeOpacity="0.38" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d={trail} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <g transform={`translate(${position.x.toFixed(2)} ${position.y.toFixed(2)})`} aria-hidden="true">
-          <circle r="10" fill="#18201d" stroke={color} strokeWidth="2" />
-          <circle r="3.5" fill={color} />
-        </g>
-        <circle cx="468" cy="142" r="5" fill="none" stroke="#e9eee9" strokeOpacity="0.7" strokeWidth="1.5" />
-        <g fill="#e9eee9" fillOpacity="0.65" fontSize="11" fontFamily="ui-monospace, monospace">
-          <text x="32" y="236">START</text>
-          <text x="468" y="236" textAnchor="end">FINISH</text>
-        </g>
-      </svg>
-      <p>{adapted ? 'A closer path illustrates what we want to explore.' : 'The path shifts as the selected wind changes.'}</p>
-    </section>
-  );
+function snapshot(state, settings) {
+  return { ...getTelemetry(state, settings), time: state.time, status: state.status, gates: [...state.gates], ghostGates: [...state.ghostGates], cleared: state.cleared, ghostCleared: state.ghostCleared, hits: state.hits, ghostHits: state.ghostHits, groundContacts: state.groundContacts, grounded: state.drone.grounded, gustRemaining: state.gustRemaining, altitude: state.drone.y };
 }
 
 export default function FlightPreview() {
-  const [windIndex, setWindIndex] = useState(2);
-  const [progress, setProgress] = useState(0);
+  const [settings, setSettings] = useState({ ...DEFAULT_SETTINGS });
+  const settingsRef = useRef(settings);
+  const simulationRef = useRef(null);
+  if (!simulationRef.current) simulationRef.current = createSimulation();
+  const [view, setView] = useState(() => snapshot(simulationRef.current, settings));
   const [isPlaying, setIsPlaying] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-  const [status, setStatus] = useState(() => reducedMotion
-    ? 'The preview is paused. Reduced motion is preferred. Choose Play preview only if you want to animate the drawings.'
-    : 'Choose a wind setting, then play the illustration. Both panels use the same setting.'
-  );
-  const progressRef = useRef(0);
-  const routes = useMemo(() => ({
-    before: makePoints(windIndex, 1),
-    after: makePoints(windIndex, 0.19),
-  }), [windIndex]);
+  const [showGhost, setShowGhost] = useState(true);
+  const [cameraMode, setCameraMode] = useState('chase');
+  const [sceneReady, setSceneReady] = useState(false);
+  const [sceneError, setSceneError] = useState('');
+  const [status, setStatus] = useState(initialMessage);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const containerRef = useRef(null);
+  const rendererRef = useRef(null);
+  const optionsRef = useRef({ showGhost, cameraMode });
+  const lastEventRef = useRef(simulationRef.current.event?.id);
 
-  useEffect(() => {
-    if (!isPlaying) return undefined;
-    let frameId;
-    let previousTime = null;
-
-    function tick(time) {
-      if (previousTime === null) previousTime = time;
-      const next = Math.min(1, progressRef.current + (time - previousTime) / DURATION_MS);
-      previousTime = time;
-      progressRef.current = next;
-      setProgress(next);
-      if (next >= 1) {
-        setIsPlaying(false);
-        setStatus(`Preview complete. Both drawings used the ${WIND_NAMES[windIndex].toLowerCase()} wind setting. Choose Replay preview to view them again.`);
-      } else {
-        frameId = window.requestAnimationFrame(tick);
-      }
+  const publish = useCallback(() => {
+    const state = simulationRef.current;
+    setView(snapshot(state, settingsRef.current));
+    if (state.event && state.event.id !== lastEventRef.current) {
+      lastEventRef.current = state.event.id;
+      if (state.event.text) setStatus(state.event.text);
     }
-
-    frameId = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [isPlaying, windIndex]);
+  }, []);
 
   useEffect(() => {
-    function onVisibilityChange() {
+    let cancelled = false;
+    // The rest of the company website stays usable while the 3D engine loads.
+    import('../simulation/flightScene.js').then(({ createFlightScene }) => {
+      if (cancelled) return;
+      const scene = createFlightScene(containerRef.current, { onError: () => {
+        if (!cancelled) {
+          setIsPlaying(false);
+          setSceneError('The 3D view is unavailable. Reload the page or try a browser with WebGL 2 enabled.');
+        }
+      } });
+      if (!scene) throw new Error('3D scene could not start');
+      rendererRef.current = scene;
+      scene.render(simulationRef.current, settingsRef.current, optionsRef.current);
+      setSceneReady(true);
+    }).catch(() => {
+      if (!cancelled) setSceneError('The 3D view could not load. Reload the page or try a browser with WebGL 2 enabled.');
+    });
+    return () => {
+      cancelled = true;
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+    optionsRef.current = { showGhost, cameraMode };
+    rendererRef.current?.render(simulationRef.current, settings, optionsRef.current);
+  }, [settings, showGhost, cameraMode, sceneReady]);
+
+  useEffect(() => {
+    if (!isPlaying || !sceneReady || sceneError) return undefined;
+    let frameId;
+    let previousTime;
+    let accumulator = 0;
+    let lastUpdate = 0;
+    function animate(now) {
+      if (previousTime === undefined) previousTime = now;
+      // Fixed steps keep the physics independent of display refresh rate.
+      accumulator += Math.min((now - previousTime) / 1000, 0.1);
+      previousTime = now;
+      while (accumulator >= FIXED_STEP && simulationRef.current.status !== 'complete') {
+        stepSimulation(simulationRef.current, settingsRef.current, FIXED_STEP);
+        accumulator -= FIXED_STEP;
+      }
+      rendererRef.current?.render(simulationRef.current, settingsRef.current, optionsRef.current);
+      if (now - lastUpdate >= 100 || simulationRef.current.status === 'complete') {
+        publish();
+        lastUpdate = now;
+      }
+      if (simulationRef.current.status === 'complete') {
+        setIsPlaying(false);
+        setStatus(`${simulationRef.current.event.text} Replay to try different conditions.`);
+        return;
+      }
+      frameId = requestAnimationFrame(animate);
+    }
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
+  }, [isPlaying, sceneReady, sceneError, publish]);
+
+  useEffect(() => {
+    function visibilityChanged() {
       if (document.hidden && isPlaying) {
         setIsPlaying(false);
-        setStatus('Preview paused because this tab was hidden. Choose Resume preview to continue.');
+        setStatus('Flight paused while this tab was hidden. Resume whenever you are ready.');
       }
     }
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [isPlaying]);
-
-  useEffect(() => {
-    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
-    function onMotionChange(event) {
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    function motionChanged(event) {
       setReducedMotion(event.matches);
-      if (event.matches && isPlaying) {
+      if (event.matches) {
         setIsPlaying(false);
-        setStatus('Preview paused after your motion preference changed. You can still choose Resume preview.');
+        setStatus('Flight paused to respect your motion preference. Start it again only if you want animation.');
       }
     }
-    if (preference.addEventListener) {
-      preference.addEventListener('change', onMotionChange);
-      return () => preference.removeEventListener('change', onMotionChange);
-    }
-    preference.addListener(onMotionChange);
-    return () => preference.removeListener(onMotionChange);
+    document.addEventListener('visibilitychange', visibilityChanged);
+    motion.addEventListener('change', motionChanged);
+    return () => {
+      document.removeEventListener('visibilitychange', visibilityChanged);
+      motion.removeEventListener('change', motionChanged);
+    };
   }, [isPlaying]);
 
-  function changeWind(event) {
-    const nextWind = Number(event.target.value);
+  function changeSetting(key, value) {
+    const next = { ...settingsRef.current, [key]: value };
+    settingsRef.current = next;
+    setSettings(next);
+    publish();
+    if (key === 'adaptive') setStatus(value ? 'Adaptive compensation enabled. The controller will estimate and counter disturbances.' : 'Adaptive compensation disabled. The drone is using its basic route controller.');
+  }
+
+  function resetFlight(nextSettings = settingsRef.current) {
     setIsPlaying(false);
-    progressRef.current = 0;
-    setProgress(0);
-    setWindIndex(nextWind);
-    setStatus(`Both paths now use ${WIND_NAMES[nextWind].toLowerCase()} wind. Playback is reset and paused.`);
+    simulationRef.current = createSimulation();
+    settingsRef.current = nextSettings;
+    lastEventRef.current = simulationRef.current.event?.id;
+    setSettings(nextSettings);
+    publish();
+    rendererRef.current?.render(simulationRef.current, nextSettings, optionsRef.current);
+    setStatus('Course reset. Both drones start from the same position and experience the same conditions.');
   }
 
   function togglePlayback() {
     if (isPlaying) {
       setIsPlaying(false);
-      setStatus('Preview paused. Choose Resume preview to continue.');
+      setStatus('Flight paused. Adjust a condition or resume the flight.');
       return;
     }
-    if (progressRef.current >= 1) {
-      progressRef.current = 0;
-      setProgress(0);
+    if (simulationRef.current.status === 'complete') {
+      simulationRef.current = createSimulation();
+      lastEventRef.current = simulationRef.current.event?.id;
+      publish();
     }
     setIsPlaying(true);
-    setStatus(`Playing the illustration with ${WIND_NAMES[windIndex].toLowerCase()} wind in both panels.`);
+    setStatus('Flight running. Change the wind or add a gust to see the controller respond.');
   }
 
-  function resetPreview() {
-    setIsPlaying(false);
-    progressRef.current = 0;
-    setProgress(0);
-    setStatus(`Preview reset to the start. The ${WIND_NAMES[windIndex].toLowerCase()} wind setting is unchanged.`);
+  function addGust() {
+    triggerGust(simulationRef.current);
+    publish();
+    setStatus('Sudden gust applied to both drones. Watch the lateral drift and corrective bank.');
   }
 
-  const playLabel = isPlaying ? 'Pause preview'
-    : progress >= 1 ? 'Replay preview'
-      : progress > 0 ? 'Resume preview' : 'Play preview';
+  const complete = view.status === 'complete';
+  const playLabel = isPlaying ? 'Pause flight' : complete ? 'Replay flight' : view.time > 0 ? 'Resume flight' : 'Start flight';
+  const progress = Math.max(0, Math.min(100, (view.progress || 0) * 100));
+  const activePreset = PRESETS.find(preset => ['wind', 'payload', 'motor'].every(key => preset[key] === settings[key]));
+  const modeLabel = complete ? 'Flight complete' : view.time === 0 ? 'Ready to fly' : !isPlaying ? 'Flight paused' : view.grounded ? 'Ground contact' : view.saturated ? 'Thrust limit' : !settings.adaptive ? 'Basic control' : view.gustRemaining > 0 ? 'Countering gust' : view.error > 0.5 ? 'Correcting drift' : 'Holding route';
 
-  return (
-    <section className="preview-panel" id="flight-preview" aria-labelledby="preview-title" data-reduced-motion={reducedMotion}>
-      <div className="preview-topline">
-        <div>
-          <p className="eyebrow">Interactive concept</p>
-          <h2 id="preview-title">See the idea in motion.</h2>
+  return <section className="flight-lab" id="flight-preview" aria-labelledby="flight-lab-title">
+    <div className="sim-header">
+      <div><p className="eyebrow"><span className="sim-live-dot" /> Interactive flight lab</p><h3 id="flight-lab-title">You change the conditions.<br className="sim-mobile-break" /> It finds its balance.</h3></div>
+      <span className="sim-model-label mono">SIMULATION / 01</span>
+    </div>
+
+    <div className="sim-layout">
+      <div className="sim-main">
+        <div className="sim-viewport">
+          <div ref={containerRef} className="sim-canvas" />
+          <div className="sim-scene-top"><span className="sim-scene-tag">ADAPTFLIGHT TEST RANGE</span><span className={`sim-control-status ${!settings.adaptive ? 'is-basic' : ''}`}><i />{modeLabel}</span></div>
+          <div className="sim-scene-readout" aria-hidden="true"><span>{number(view.altitude)} <small>m ALT</small></span><span>{number(view.speed)} <small>m/s FWD</small></span></div>
+          <div className="sim-view-switch" role="group" aria-label="Camera view"><button type="button" aria-pressed={cameraMode === 'chase'} onClick={() => setCameraMode('chase')}>Chase cam</button><button type="button" aria-pressed={cameraMode === 'overview'} onClick={() => setCameraMode('overview')}>Course view</button></div>
+          {(!sceneReady || sceneError) && <div className="sim-scene-message" role="status"><strong>{sceneError ? '3D view unavailable' : 'Preparing the course…'}</strong><p>{sceneError || 'Setting up the drone and flight environment.'}</p></div>}
+          {sceneReady && !sceneError && view.time === 0 && <div className="sim-start-hint"><span className="mono">READY FOR TAKEOFF</span><p>Six gates. Changing conditions. One flight path.</p></div>}
+          {complete && <div className="sim-result"><span className="mono">FLIGHT COMPLETE</span><strong>{view.cleared}<small> / {COURSE.length} gates cleared</small></strong><p>{view.hits} obstacle contacts · {view.gates.filter(gate => gate === 'missed').length} missed gates{view.groundContacts > 0 && ` · ${view.groundContacts} ground contacts`}</p><p>Basic control: {view.ghostCleared}/{COURSE.length} gates · {view.ghostHits} obstacle contacts</p></div>}
+          <div className="sim-scene-legend"><span><i className="legend-adaptive" />Your drone</span>{showGhost && <span><i className="legend-baseline" />Basic control</span>}<span className="legend-route"><i />Planned route</span></div>
         </div>
-        <span className="mono">ONE SCENARIO · TWO PATHS</span>
-      </div>
-      <p className="preview-disclaimer" id="preview-disclaimer">Illustrative paths, not results from a trained AI model.</p>
 
-      <div className="preview-controls">
-        <div className="wind-control">
-          <label htmlFor="preview-wind">
-            Wind setting <output className="mono" id="preview-wind-label" htmlFor="preview-wind">{WIND_NAMES[windIndex]}</output>
-          </label>
-          <input
-            id="preview-wind"
-            type="range"
-            min="0"
-            max="3"
-            step="1"
-            value={windIndex}
-            onChange={changeWind}
-            aria-valuetext={WIND_NAMES[windIndex]}
-            aria-describedby="preview-disclaimer"
-          />
-          <div className="mono" aria-hidden="true"><span>Calm</span><span>Strong</span></div>
+        <div className="sim-transport">
+          <button className="button button-accent sim-play" type="button" onClick={togglePlayback} disabled={!sceneReady || !!sceneError}><PlayIcon paused={isPlaying} />{playLabel}</button>
+          <button className="sim-reset" type="button" onClick={() => resetFlight()} aria-label="Reset flight"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><path d="M4 7a7 7 0 1 1-1 6M4 2v5h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg><span>Reset</span></button>
+          <div className="sim-course-progress"><div><span className="mono">COURSE PROGRESS</span><span>{number(view.time, 0)}s <span aria-hidden="true">/</span> {view.cleared}/{COURSE.length} gates</span></div><div className="sim-progress-track" role="progressbar" aria-label="Course progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress)}><i style={{ width: `${progress}%` }} /></div></div>
         </div>
-        <button className="button button-accent" id="preview-play" type="button" onClick={togglePlayback}>{playLabel}</button>
-        <button className="button button-outline" id="preview-reset" type="button" onClick={resetPreview}>Reset</button>
+
+        <div className="sim-telemetry" aria-label="Live simulation telemetry">
+          <div><span className="sim-metric-label">Your path error</span><strong>{number(view.error, 2)}<small> m</small></strong><span className="sim-metric-note">Distance from planned route</span></div>
+          <div className="sim-baseline-metric"><span className="sim-metric-label">Basic control error</span><strong>{number(view.ghostError, 2)}<small> m</small></strong><span className="sim-metric-note">Same flight, no compensation</span></div>
+          <div><span className="sim-metric-label">Correction</span><strong>{number(settings.adaptive ? view.correction : 0)}<small> m/s²</small></strong><span className="sim-metric-note">Requested disturbance compensation</span></div>
+        </div>
       </div>
 
-      <div className="comparison-grid">
-        <FlightPanel adapted={false} points={routes.before} progress={progress} windIndex={windIndex} />
-        <FlightPanel adapted points={routes.after} progress={progress} windIndex={windIndex} />
-      </div>
-      <div className="preview-bottomline">
-        <span className="mono">DASHED LINE = PLANNED PATH</span>
-        <p id="preview-status" role="status" aria-live="polite" aria-atomic="true">{status}</p>
-      </div>
-    </section>
-  );
+      <aside className="sim-settings" aria-label="Flight conditions">
+        <div className="sim-settings-heading"><h4>Make it unpredictable.</h4><p>Change these while the drone is flying.</p></div>
+        <div className="sim-presets" role="group" aria-label="Scenario presets">{PRESETS.map(preset => <button type="button" key={preset.name} aria-pressed={activePreset?.name === preset.name} onClick={() => resetFlight({ ...settingsRef.current, wind: preset.wind, payload: preset.payload, motor: preset.motor })}>{preset.name}</button>)}</div>
+        <RangeControl name="Crosswind" id="sim-wind" value={settings.wind} min={0} max={12} unit="m/s" low="Still air" high="Strong wind" onChange={value => changeSetting('wind', value)} />
+        <RangeControl name="Added payload" id="sim-payload" value={settings.payload} min={0} max={50} unit="%" low="No extra load" high="Heavier drone" onChange={value => changeSetting('payload', value)} />
+        <RangeControl name="Motor strength" id="sim-motor" value={settings.motor} min={55} max={100} unit="%" low="Reduced power" high="Full power" onChange={value => changeSetting('motor', value)} />
+        <button className="sim-gust" type="button" onClick={addGust} disabled={!isPlaying || view.gustRemaining > 0}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M3 8h12a3 3 0 1 0-3-3M2 12h17a3 3 0 1 1-3 3M5 16h4a3 3 0 1 1-3 3" /></svg>{view.gustRemaining > 0 ? `Gust active · ${number(view.gustRemaining)}s` : 'Send a sudden gust'}<span aria-hidden="true">↗</span></button>
+        <div className="sim-toggles"><label className="sim-toggle"><span><strong>Adaptive compensation</strong><small>Estimate disturbances and counter them</small></span><input type="checkbox" role="switch" checked={settings.adaptive} onChange={event => changeSetting('adaptive', event.target.checked)} /><i aria-hidden="true" /></label><label className="sim-ghost-toggle"><input type="checkbox" checked={showGhost} onChange={event => setShowGhost(event.target.checked)} /><span>Show comparison drone</span></label></div>
+        <p className="sim-control-help">The coral drone follows the same route with basic feedback control. Only the green drone estimates and compensates for unexpected forces when adaptation is on.</p>
+      </aside>
+    </div>
+
+    <div className="sim-flight-log"><span className="mono">FLIGHT LOG</span><p role="status" aria-live="polite" aria-atomic="true">{status}</p></div>
+    <div className="sim-explainer"><p><strong>What you’re seeing:</strong> motion calculated from simplified forces and a feedback controller. Gate contacts are scored; the flight continues so you can compare recovery. This browser demo uses disturbance estimation, not trained AI or a validated flight model.</p>{reducedMotion && <p className="sim-motion-note">Reduced motion is enabled. Animation starts only when you choose to play the flight.</p>}</div>
+  </section>;
 }
