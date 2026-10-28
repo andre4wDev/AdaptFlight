@@ -4,9 +4,9 @@ export const teamMembers = [
   {
     id: 'member-1',
     name: 'Andrew Galvez',
-    role: 'Website Development',
+    role: 'Website Development | Backend Systems Engineer',
     bio: 'Andrew is part of the AdaptFlight team and is developing the Website and the backend systems AdaptFlight will use. The website helps introduce the team and give visitors a first look at the flight adaptation idea.',
-    photo: '',
+    photo: 'images/team/andrew.jpg',
     alt: '',
   },
   {
@@ -14,7 +14,7 @@ export const teamMembers = [
     name: 'Arthur Stupa',
     role: '[Add Arthur’s project title]',
     bio: '[Add 2–3 sentences about Arthur, their responsibilities on AdaptFlight, and the skills or interests they bring to the project.]',
-    photo: '',
+    photo: 'images/team/arthur.jpg',
     alt: '',
   },
   {
@@ -29,7 +29,7 @@ export const teamMembers = [
     id: 'member-4',
     name: 'Dhanush Somayajulu',
     role: '[Add Dhanush’s project title]',
-    bio: '[Add 2–3 sentences about Dhanush, their responsibilities on AdaptFlight, and the skills or interests they bring to the project.]',
+    bio: 'Dhanush is part of the AdaptFlight team and is developing the Website and the backend systems AdaptFlight will use. The website helps introduce the team and give visitors a first look at the flight adaptation idea.',
     photo: '',
     alt: '',
   },
