@@ -1,11 +1,17 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { COURSE, FINISH_Z, gateObstacleBoxes, routeAt } from './flightPhysics.js';
 
 // Presentation only. Every drone pose, trail, and gate result comes from the
 // simulation. Nothing in this renderer moves the drone along a canned path.
-const COLORS = { lime: 0xc8f578, coral: 0xf2a183, orange: 0xeaac66, dark: 0x22362e };
+const COLORS = { lime: 0xc8f578, coral: 0xf2a183, orange: 0xeaac66, dark: 0x22362e, route: 0x1675ee, wind: 0xed9b24 };
 const TRAIL_POINTS = 240;
+const WIND_PARTICLES = 30;
 
 function material(color, options = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.78, ...options });
@@ -47,24 +53,24 @@ function batchStaticMeshes(parent) {
   oldGeometries.forEach(geometry => geometry.dispose());
 }
 
-function label(text, dark = false) {
+function label(text, dark = false, accent = null) {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 96;
   const context = canvas.getContext('2d');
   context.fillStyle = dark ? '#20342ce6' : '#e7eee4eb';
   context.fillRect(0, 0, 256, 96);
-  context.strokeStyle = dark ? '#9bb787' : '#879b85';
+  context.strokeStyle = accent || (dark ? '#9bb787' : '#879b85');
   context.lineWidth = 3;
   context.strokeRect(2, 2, 252, 92);
-  context.fillStyle = dark ? '#dcf4bd' : '#304936';
+  context.fillStyle = accent || (dark ? '#dcf4bd' : '#304936');
   context.font = '500 38px monospace';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText(text, 128, 50);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false }));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false, toneMapped: false, fog: false }));
   sprite.scale.set(2.5, 0.94, 1);
   return sprite;
 }
@@ -115,26 +121,59 @@ function createDrone(color, ghost = false) {
   return { group, props, discs, accent, body };
 }
 
+function wideLine(geometry, color, width, { opacity = 1, segments = false, outlineColor = 0x163a31, outlineWidth = width + 3, dashed = false } = {}) {
+  const line = new THREE.Group();
+  const common = { worldUnits: false, transparent: true, depthWrite: false, toneMapped: false, fog: false, alphaToCoverage: true, dashed, dashSize: 1.15, gapSize: 0.5 };
+  const outer = new LineMaterial({ ...common, color: outlineColor, linewidth: outlineWidth, opacity: opacity * 0.8 });
+  const inner = new LineMaterial({ ...common, color, linewidth: width, opacity });
+  const LineClass = segments ? LineSegments2 : Line2;
+  const outline = new LineClass(geometry, outer);
+  const stroke = new LineClass(geometry, inner);
+  outline.frustumCulled = false;
+  stroke.frustumCulled = false;
+  outline.renderOrder = 3;
+  stroke.renderOrder = 4;
+  line.add(outline, stroke);
+  if (dashed) stroke.computeLineDistances();
+  return { line, geometry, outline, stroke };
+}
+
 function createTrail(scene, color, opacity) {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_POINTS * 3), 3));
-  geometry.setDrawRange(0, 0);
-  const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
-  line.frustumCulled = false;
-  scene.add(line);
-  return { line, geometry };
+  const geometry = new LineGeometry().setPositions(new Float32Array(TRAIL_POINTS * 3));
+  geometry.instanceCount = 0;
+  const trail = wideLine(geometry, color, 3.5, { opacity, outlineWidth: 6.5 });
+  scene.add(trail.line);
+  return trail;
 }
 
 function updateTrail(trail, points) {
   const count = Math.min(points?.length || 0, TRAIL_POINTS);
   const offset = Math.max(0, (points?.length || 0) - count);
-  const positions = trail.geometry.attributes.position;
-  for (let i = 0; i < count; i++) {
-    const p = points[offset + i];
-    positions.setXYZ(i, p.x, p.y, p.z);
+  const buffer = trail.geometry.attributes.instanceStart.data;
+  for (let i = 0; i < count - 1; i++) {
+    const a = points[offset + i];
+    const b = points[offset + i + 1];
+    const k = i * 6;
+    buffer.array[k] = a.x; buffer.array[k + 1] = a.y; buffer.array[k + 2] = a.z;
+    buffer.array[k + 3] = b.x; buffer.array[k + 4] = b.y; buffer.array[k + 5] = b.z;
   }
-  positions.needsUpdate = true;
-  trail.geometry.setDrawRange(0, count);
+  buffer.needsUpdate = true;
+  trail.geometry.instanceCount = Math.max(0, count - 1);
+}
+
+function forceArrow(color) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color, toneMapped: false, fog: false });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1, 8), mat);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.38, 12), mat);
+  shaft.rotation.z = -Math.PI / 2;
+  tip.rotation.z = -Math.PI / 2;
+  group.add(shaft, tip);
+  return { group, setLength(length) {
+    shaft.scale.y = Math.max(0.1, length - 0.3);
+    shaft.position.x = (length - 0.3) / 2;
+    tip.position.x = length - 0.19;
+  } };
 }
 
 export function createFlightScene(container, { onError } = {}) {
@@ -150,7 +189,7 @@ export function createFlightScene(container, { onError } = {}) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
   renderer.domElement.setAttribute('role', 'img');
-  renderer.domElement.setAttribute('aria-label', 'Third-person drone flight through a slalom of rectangular gates. Lime shows the adaptive drone; coral shows the comparison drone.');
+  renderer.domElement.setAttribute('aria-label', 'Third-person drone flight through rectangular gates. Blue marks the planned route and next target; lime and coral show actual flight paths. Amber arrows show the wind direction and green arrows show the corrective force.');
   renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;';
   container.appendChild(renderer.domElement);
 
@@ -256,11 +295,30 @@ export function createFlightScene(container, { onError } = {}) {
   const routePoints = [];
   for (let z = 0; z <= FINISH_Z; z += 0.5) {
     const p = routeAt(z);
-    routePoints.push(new THREE.Vector3(p.x, p.y, z));
+    routePoints.push(p.x, p.y, z);
   }
-  const routeLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(routePoints), new THREE.LineDashedMaterial({ color: 0xecf7db, dashSize: 0.7, gapSize: 0.8, transparent: true, opacity: 0.72 }));
-  routeLine.computeLineDistances();
-  scene.add(routeLine);
+  const routeLine = wideLine(new LineGeometry().setPositions(routePoints), COLORS.route, 4, { outlineWidth: 7, outlineColor: 0x0c355e, dashed: true });
+  scene.add(routeLine.line);
+  const chevronPositions = [];
+  for (let z = 7; z < FINISH_Z; z += 7) {
+    const back = routeAt(z - 0.9);
+    const tip = routeAt(z + 0.35);
+    for (const side of [-1, 1]) chevronPositions.push(back.x + side * 0.48, back.y + 0.025, back.z, tip.x, tip.y + 0.025, tip.z);
+  }
+  const routeChevrons = wideLine(new LineSegmentsGeometry().setPositions(chevronPositions), COLORS.route, 3.5, { segments: true, outlineWidth: 6.5, outlineColor: 0x0c355e });
+  scene.add(routeChevrons.line);
+  const targetMarker = new THREE.Group();
+  const targetCircle = [];
+  for (let i = 0; i <= 48; i++) {
+    const angle = i / 48 * Math.PI * 2;
+    targetCircle.push(Math.cos(angle) * 0.72, Math.sin(angle) * 0.72, 0);
+  }
+  const targetRing = wideLine(new LineGeometry().setPositions(targetCircle), COLORS.route, 4, { outlineWidth: 7, outlineColor: 0x0c355e });
+  const targetLabel = label('NEXT TARGET', true, '#72b6ff');
+  targetLabel.position.y = 1.2;
+  targetLabel.scale.set(2.3, 0.65, 1);
+  targetMarker.add(targetRing.line, targetLabel);
+  scene.add(targetMarker);
 
   const drone = createDrone(COLORS.lime);
   const ghost = createDrone(COLORS.coral, true);
@@ -272,17 +330,22 @@ export function createFlightScene(container, { onError } = {}) {
   shadow.position.y = 0.11;
   scene.add(shadow);
 
-  const windGeometry = new THREE.BufferGeometry();
-  const windPositions = new Float32Array(84 * 6);
-  windGeometry.setAttribute('position', new THREE.BufferAttribute(windPositions, 3));
-  const windMaterial = new THREE.LineBasicMaterial({ color: 0xf5f8e9, transparent: true, opacity: 0.3, depthWrite: false });
-  const windLines = new THREE.LineSegments(windGeometry, windMaterial);
-  windLines.frustumCulled = false;
-  scene.add(windLines);
+  // A few directional glyphs around the flight corridor show the airflow.
+  // Screen-space widths keep these readable on mobile as well as desktop.
+  const windGeometry = new LineSegmentsGeometry().setPositions(new Float32Array(WIND_PARTICLES * 3 * 6));
+  const windBuffer = windGeometry.attributes.instanceStart.data;
+  const windPositions = windBuffer.array;
+  windGeometry.instanceCount = 0;
+  const windLines = wideLine(windGeometry, COLORS.wind, 2.5, { segments: true, opacity: 0.8, outlineWidth: 4, outlineColor: 0x765018 });
+  scene.add(windLines.line);
 
-  const windArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 2, COLORS.coral, 0.35, 0.2);
-  const correctionArrow = new THREE.ArrowHelper(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(), 2, COLORS.lime, 0.35, 0.2);
-  scene.add(windArrow, correctionArrow);
+  const windArrow = forceArrow(COLORS.wind);
+  const correctionArrow = forceArrow(COLORS.lime);
+  const windLabel = label('WIND PUSH', true, '#ffcb68');
+  const correctionLabel = label('CORRECTION', true, '#c8f578');
+  windLabel.scale.set(1.6, 0.42, 1);
+  correctionLabel.scale.set(1.65, 0.42, 1);
+  scene.add(windArrow.group, correctionArrow.group, windLabel, correctionLabel);
   const desiredCamera = new THREE.Vector3();
   const desiredLook = new THREE.Vector3();
   const currentLook = new THREE.Vector3();
@@ -295,6 +358,7 @@ export function createFlightScene(container, { onError } = {}) {
   let lastOptions = null;
   let disposed = false;
   let contextLost = false;
+  let windPhase = 0;
 
   function resize() {
     if (disposed) return;
@@ -326,7 +390,8 @@ export function createFlightScene(container, { onError } = {}) {
     const z = p.z;
     const time = state.time || 0;
     const advanced = lastTime === null ? 0 : Math.max(0, time - lastTime);
-    const reset = lastTime === null || time < lastTime || cameraMode !== lastMode;
+    const simulationReset = lastTime === null || time < lastTime;
+    const reset = simulationReset || cameraMode !== lastMode;
     const playing = state.status === 'flying' && advanced > 0;
     pose(drone, p, time, playing);
     pose(ghost, state.ghost, time, playing);
@@ -344,37 +409,66 @@ export function createFlightScene(container, { onError } = {}) {
       gate.frame.emissiveIntensity = status === 'pending' ? 0.05 : 0.2;
       gate.trim.color.setHex(status === 'cleared' ? 0xe3ffc2 : 0xffe3ac);
     });
-    const wind = Math.max(0, Number(settings.wind) || 0);
-    const gust = state.gustRemaining > 0 ? 5 : 0;
-    const particleSpeed = wind * 0.65 + gust;
-    windLines.visible = particleSpeed > 0.1;
-    windMaterial.opacity = Math.min(0.55, 0.17 + particleSpeed * 0.025);
-    for (let i = 0; i < 84; i++) {
-      const x = ((i * 7.73 + time * particleSpeed) % 48) - 24;
-      const y = 1.2 + (i * 3.71 % 12);
-      const particleZ = z - 12 + (i * 11.17 % 66);
-      const length = 0.25 + particleSpeed * 0.12;
-      const k = i * 6;
-      windPositions[k] = x; windPositions[k + 1] = y; windPositions[k + 2] = particleZ;
-      windPositions[k + 3] = x + length; windPositions[k + 4] = y; windPositions[k + 5] = particleZ;
+    const nextGateIndex = state.gates.findIndex(status => status === 'pending');
+    targetMarker.visible = nextGateIndex !== -1;
+    if (targetMarker.visible) {
+      const targetGate = COURSE[nextGateIndex];
+      targetMarker.position.set(targetGate.x, targetGate.y, targetGate.z - 0.22);
+      targetRing.line.scale.setScalar(1 + Math.sin(time * 3) * 0.06);
     }
-    windGeometry.attributes.position.needsUpdate = true;
-    windArrow.visible = wind > 0.1 || gust > 0;
-    windArrow.position.set(p.x, p.y + 1.1, z);
-    windArrow.setDirection(xDirection);
-    windArrow.setLength(Math.min(3.3, 0.45 + wind * 0.12 + gust * 0.18), 0.28, 0.16);
+    const wind = Math.max(0, Number(settings.wind) || 0);
+    // Gusts are additive force, not extra m/s. Their actual applied force only
+    // controls the visual emphasis; base wind remains the selected condition.
+    const gust = state.gustRemaining > 0 ? Math.max(0, state.forces?.gust || 0) : 0;
+    const particleSpeed = wind * 0.65 + gust * 0.75;
+    const hasWind = wind > 0 || gust > 0.01;
+    if (simulationReset) windPhase = 0;
+    // Integrate the phase rather than time * current speed, so changing the
+    // setting does not teleport the airflow. No elapsed simulation time = no motion.
+    windPhase = (windPhase + advanced * particleSpeed) % 28;
+    windLines.line.visible = hasWind;
+    const particleCount = hasWind ? Math.min(WIND_PARTICLES, Math.round(7 + wind * 1.2 + gust * 1.2)) : 0;
+    const windLength = Math.min(3.4, 0.6 + wind * 0.16 + gust * 0.14);
+    const route = routeAt(z);
+    for (let i = 0; i < particleCount; i++) {
+      const x = ((i * 7.73 + windPhase) % 28) - 14 + route.x;
+      const y = Math.max(0.8, p.y - 2.1 + (i * 1.713 % 5.4));
+      const particleZ = z - 3 + (i * 7.137 % 31);
+      const tipX = x + windLength;
+      const head = Math.min(0.45, 0.22 + windLength * 0.06);
+      const k = i * 18;
+      // Shaft and two arrowhead strokes, always pointing along world +X.
+      windPositions[k] = x; windPositions[k + 1] = y; windPositions[k + 2] = particleZ;
+      windPositions[k + 3] = tipX; windPositions[k + 4] = y; windPositions[k + 5] = particleZ;
+      windPositions[k + 6] = tipX - head; windPositions[k + 7] = y + head * 0.65; windPositions[k + 8] = particleZ;
+      windPositions[k + 9] = tipX; windPositions[k + 10] = y; windPositions[k + 11] = particleZ;
+      windPositions[k + 12] = tipX - head; windPositions[k + 13] = y - head * 0.65; windPositions[k + 14] = particleZ;
+      windPositions[k + 15] = tipX; windPositions[k + 16] = y; windPositions[k + 17] = particleZ;
+    }
+    windBuffer.needsUpdate = true;
+    windGeometry.instanceCount = particleCount * 3;
+    windLines.stroke.material.linewidth = gust > 0.1 ? 3.2 : 2.5;
+    windLines.outline.material.linewidth = gust > 0.1 ? 5 : 4;
+    windArrow.group.visible = hasWind;
+    windLabel.visible = hasWind;
+    windArrow.group.position.set(p.x, p.y + 1.2, z);
+    const forceLength = Math.min(3.8, 0.75 + wind * 0.15 + gust * 0.2);
+    windArrow.setLength(forceLength);
+    windLabel.position.set(p.x + forceLength * 0.55, p.y + 1.63, z);
     const correctionX = p.correctionX || 0;
     const correctionY = p.correctionY || 0;
     const correctionSize = Math.hypot(correctionX, correctionY);
-    correctionArrow.visible = settings.adaptive && correctionSize > 0.08;
-    if (correctionArrow.visible) {
+    correctionArrow.group.visible = settings.adaptive && correctionSize > 0.08;
+    correctionLabel.visible = correctionArrow.group.visible;
+    if (correctionArrow.group.visible) {
       correctionDirection.set(correctionX, correctionY, 0).normalize();
-      correctionArrow.position.set(p.x, p.y + 0.7, z - 0.25);
-      correctionArrow.setDirection(correctionDirection);
-      correctionArrow.setLength(Math.min(3.2, 0.35 + correctionSize * 0.3), 0.28, 0.16);
+      const length = Math.min(3.2, 0.55 + correctionSize * 0.3);
+      correctionArrow.group.position.set(p.x, p.y + 0.55, z - 0.25);
+      correctionArrow.group.quaternion.setFromUnitVectors(xDirection, correctionDirection);
+      correctionArrow.setLength(length);
+      correctionLabel.position.set(p.x + correctionDirection.x * length * 0.6, p.y + 0.85 + correctionDirection.y * length * 0.6, z - 0.25);
     }
 
-    const route = routeAt(z);
     const ahead = routeAt(Math.min(FINISH_Z, z + 12));
     if (cameraMode === 'overview') {
       desiredCamera.set(route.x + 27, 24, z - 27);

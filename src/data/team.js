@@ -12,7 +12,7 @@ export const teamMembers = [
   {
     id: 'member-2',
     name: 'Arthur Stupa',
-    role: 'AI Flight Adaptation',
+    role: 'AI Flight Adaptation Engineer',
     bio: 'Arthur is part of the AdaptFlight team and is working on the AI flight adaptation aspect of the project. He helps develop the algorithms and models that enable the drone to respond to changing flight conditions. Arthur has extensive knowledge about AI and machine learning.',
     photo: 'images/team/arthur.jpg',
     alt: '',
@@ -28,9 +28,9 @@ export const teamMembers = [
   {
     id: 'member-4',
     name: 'Dhanush Somayajulu',
-    role: '[Add Dhanush’s project title]',
-    bio: 'Dhanush is part of the AdaptFlight team and is developing the Website and the backend systems AdaptFlight will use. The website helps introduce the team and give visitors a first look at the flight adaptation idea.',
-    photo: '',
+    role: 'Simulation and AI Flight Adaptation Engineer',
+    bio: 'Dhanush is part of the AdaptFlight team and is developing the Website and AI flight adaptation and Simulation. Dhanush has extensive experience in the development of AI models and simulation environments.',
+    photo: 'images/team/nush.jpg',
     alt: '',
   },
 ];

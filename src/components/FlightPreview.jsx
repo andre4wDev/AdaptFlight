@@ -180,6 +180,8 @@ export default function FlightPreview() {
   }
 
   const complete = view.status === 'complete';
+  const gustActive = view.gustRemaining > 0;
+  const windActive = settings.wind > 0 || gustActive;
   const playLabel = isPlaying ? 'Pause flight' : complete ? 'Replay flight' : view.time > 0 ? 'Resume flight' : 'Start flight';
   const progress = Math.max(0, Math.min(100, (view.progress || 0) * 100));
   const activePreset = PRESETS.find(preset => ['wind', 'payload', 'motor'].every(key => preset[key] === settings[key]));
@@ -197,11 +199,16 @@ export default function FlightPreview() {
           <div ref={containerRef} className="sim-canvas" />
           <div className="sim-scene-top"><span className="sim-scene-tag">ADAPTFLIGHT TEST RANGE</span><span className={`sim-control-status ${!settings.adaptive ? 'is-basic' : ''}`}><i />{modeLabel}</span></div>
           <div className="sim-scene-readout" aria-hidden="true"><span>{number(view.altitude)} <small>m ALT</small></span><span>{number(view.speed)} <small>m/s FWD</small></span></div>
+          <div className={`sim-wind-cue ${windActive ? 'has-wind' : 'is-calm'} ${gustActive ? 'has-gust' : ''}`} role="group" aria-label={windActive ? `Wind setting ${settings.wind} meters per second, pushing ${cameraMode === 'overview' ? 'down and left' : 'left'} in this view${gustActive ? ', sudden gust active' : ''}` : 'Calm air. No wind force.'}>
+            <svg className="sim-wind-direction" style={{ transform: `rotate(${cameraMode === 'overview' ? -30 : -4}deg)` }} viewBox="0 0 40 30" width="40" height="30" fill="none" aria-hidden="true"><path d="M35 15H5m0 0 10-9M5 15l10 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <div><strong>{windActive ? 'Wind push' : 'Calm air'}</strong><span>{settings.wind} m/s setting</span></div>
+            {gustActive && <span className="sim-gust-badge">GUST</span>}
+          </div>
           <div className="sim-view-switch" role="group" aria-label="Camera view"><button type="button" aria-pressed={cameraMode === 'chase'} onClick={() => setCameraMode('chase')}>Chase cam</button><button type="button" aria-pressed={cameraMode === 'overview'} onClick={() => setCameraMode('overview')}>Course view</button></div>
           {(!sceneReady || sceneError) && <div className="sim-scene-message" role="status"><strong>{sceneError ? '3D view unavailable' : 'Preparing the course…'}</strong><p>{sceneError || 'Setting up the drone and flight environment.'}</p></div>}
-          {sceneReady && !sceneError && view.time === 0 && <div className="sim-start-hint"><span className="mono">READY FOR TAKEOFF</span><p>Six gates. Changing conditions. One flight path.</p></div>}
+          {sceneReady && !sceneError && view.time === 0 && <div className="sim-start-hint"><span className="mono">READY FOR TAKEOFF</span><p>Follow the blue route. Amber arrows show the wind.</p></div>}
           {complete && <div className="sim-result"><span className="mono">FLIGHT COMPLETE</span><strong>{view.cleared}<small> / {COURSE.length} gates cleared</small></strong><p>{view.hits} obstacle contacts · {view.gates.filter(gate => gate === 'missed').length} missed gates{view.groundContacts > 0 && ` · ${view.groundContacts} ground contacts`}</p><p>Basic control: {view.ghostCleared}/{COURSE.length} gates · {view.ghostHits} obstacle contacts</p></div>}
-          <div className="sim-scene-legend"><span><i className="legend-adaptive" />Your drone</span>{showGhost && <span><i className="legend-baseline" />Basic control</span>}<span className="legend-route"><i />Planned route</span></div>
+          <div className="sim-scene-legend"><span className="legend-route"><i />Planned route</span><span><i className="legend-adaptive" />Your trail</span>{showGhost && <span><i className="legend-baseline" />Basic control trail</span>}<span className="legend-wind"><i aria-hidden="true">←</i>Wind push</span></div>
         </div>
 
         <div className="sim-transport">
