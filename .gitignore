@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.openai/
+.sites-runtime/
+.vite/
+.DS_Store
+Thumbs.db
+*.local
+*.log
+.env
+.env.*
+!.env.example

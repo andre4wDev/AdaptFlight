@@ -1,0 +1,5 @@
+Put your real team photos in this folder, for example member-1.jpg.
+Then update photo and alt in src/data/team.js.
+Use photo: 'images/team/member-1.jpg' (do not include public/).
+Photo filenames are case-sensitive on GitHub Pages.
+The generic profile illustrations are placeholders, not rubric-ready photos.
