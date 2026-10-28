@@ -12,8 +12,8 @@ export const teamMembers = [
   {
     id: 'member-2',
     name: 'Arthur Stupa',
-    role: '[Add Arthur’s project title]',
-    bio: '[Add 2–3 sentences about Arthur, their responsibilities on AdaptFlight, and the skills or interests they bring to the project.]',
+    role: 'AI Flight Adaptation',
+    bio: 'Arthur is part of the AdaptFlight team and is working on the AI flight adaptation aspect of the project. He helps develop the algorithms and models that enable the drone to respond to changing flight conditions. Arthur has extensive knowledge about AI and machine learning.',
     photo: 'images/team/arthur.jpg',
     alt: '',
   },
