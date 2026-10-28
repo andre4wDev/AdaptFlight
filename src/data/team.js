@@ -1,15 +1,11 @@
-// Names come from your Project Charter dated October 21, 2026.
-// Andrew's website work comes from the assignment split described in chat.
-// Replace remaining placeholders with your team's REAL details before submitting.
 // Photos belong in public/images/team/. Use a path WITHOUT the public/ prefix.
 // Example photo: 'images/team/andrew.jpg'. Keep names and filename case exact.
-// You may add or remove objects if the number of team members changes.
 export const teamMembers = [
   {
     id: 'member-1',
     name: 'Andrew Galvez',
     role: 'Website Development',
-    bio: 'Andrew is part of the AdaptFlight team and is developing the Products and About Us pages. These pages introduce the team and give visitors a first look at the flight adaptation idea.',
+    bio: 'Andrew is part of the AdaptFlight team and is developing the Website and the backend systems AdaptFlight will use. The website helps introduce the team and give visitors a first look at the flight adaptation idea.',
     photo: '',
     alt: '',
   },

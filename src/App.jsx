@@ -46,7 +46,7 @@ export default function App() {
             <a href="#/products" aria-current={page === 'products' ? 'page' : undefined}>Products</a>
             <a href="#/about" aria-current={page === 'about' ? 'page' : undefined}>About Us</a>
           </nav>
-          <span className="header-status"><span className="status-dot"/> Class prototype</span>
+          <span className="header-status"><span className="status-dot"/>Prototype</span>
         </div>
       </header>
       <main id="main-content" ref={mainRef} tabIndex="-1">
