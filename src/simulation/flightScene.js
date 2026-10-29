@@ -306,6 +306,7 @@ export function createFlightScene(container, { onError } = {}) {
     for (const side of [-1, 1]) chevronPositions.push(back.x + side * 0.48, back.y + 0.025, back.z, tip.x, tip.y + 0.025, tip.z);
   }
   const routeChevrons = wideLine(new LineSegmentsGeometry().setPositions(chevronPositions), COLORS.route, 3.5, { segments: true, outlineWidth: 6.5, outlineColor: 0x0c355e });
+  const chevronBuffer = routeChevrons.geometry.attributes.instanceStart.data;
   scene.add(routeChevrons.line);
   const targetMarker = new THREE.Group();
   const targetCircle = [];
@@ -341,11 +342,7 @@ export function createFlightScene(container, { onError } = {}) {
 
   const windArrow = forceArrow(COLORS.wind);
   const correctionArrow = forceArrow(COLORS.lime);
-  const windLabel = label('WIND PUSH', true, '#ffcb68');
-  const correctionLabel = label('CORRECTION', true, '#c8f578');
-  windLabel.scale.set(1.6, 0.42, 1);
-  correctionLabel.scale.set(1.65, 0.42, 1);
-  scene.add(windArrow.group, correctionArrow.group, windLabel, correctionLabel);
+  scene.add(windArrow.group, correctionArrow.group);
   const desiredCamera = new THREE.Vector3();
   const desiredLook = new THREE.Vector3();
   const currentLook = new THREE.Vector3();
@@ -416,6 +413,14 @@ export function createFlightScene(container, { onError } = {}) {
       targetMarker.position.set(targetGate.x, targetGate.y, targetGate.z - 0.22);
       targetRing.line.scale.setScalar(1 + Math.sin(time * 3) * 0.06);
     }
+    // Only the next short stretch needs direction cues. Far-away chevrons
+    // otherwise stack together at the horizon and obscure the gate openings.
+    const firstChevron = Math.max(0, Math.ceil((z + 2) / 7) - 1);
+    const lastChevron = Math.min(chevronPositions.length / 12 - 1, Math.floor((z + 35) / 7) - 1);
+    const visibleChevrons = Math.max(0, lastChevron - firstChevron + 1);
+    for (let i = 0; i < visibleChevrons * 12; i++) chevronBuffer.array[i] = chevronPositions[firstChevron * 12 + i];
+    chevronBuffer.needsUpdate = true;
+    routeChevrons.geometry.instanceCount = visibleChevrons * 2;
     const wind = Math.max(0, Number(settings.wind) || 0);
     // Gusts are additive force, not extra m/s. Their actual applied force only
     // controls the visual emphasis; base wind remains the selected condition.
@@ -450,23 +455,19 @@ export function createFlightScene(container, { onError } = {}) {
     windLines.stroke.material.linewidth = gust > 0.1 ? 3.2 : 2.5;
     windLines.outline.material.linewidth = gust > 0.1 ? 5 : 4;
     windArrow.group.visible = hasWind;
-    windLabel.visible = hasWind;
     windArrow.group.position.set(p.x, p.y + 1.2, z);
     const forceLength = Math.min(3.8, 0.75 + wind * 0.15 + gust * 0.2);
     windArrow.setLength(forceLength);
-    windLabel.position.set(p.x + forceLength * 0.55, p.y + 1.63, z);
     const correctionX = p.correctionX || 0;
     const correctionY = p.correctionY || 0;
     const correctionSize = Math.hypot(correctionX, correctionY);
     correctionArrow.group.visible = settings.adaptive && correctionSize > 0.08;
-    correctionLabel.visible = correctionArrow.group.visible;
     if (correctionArrow.group.visible) {
       correctionDirection.set(correctionX, correctionY, 0).normalize();
       const length = Math.min(3.2, 0.55 + correctionSize * 0.3);
       correctionArrow.group.position.set(p.x, p.y + 0.55, z - 0.25);
       correctionArrow.group.quaternion.setFromUnitVectors(xDirection, correctionDirection);
       correctionArrow.setLength(length);
-      correctionLabel.position.set(p.x + correctionDirection.x * length * 0.6, p.y + 0.85 + correctionDirection.y * length * 0.6, z - 0.25);
     }
 
     const ahead = routeAt(Math.min(FINISH_Z, z + 12));
