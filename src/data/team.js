@@ -21,7 +21,7 @@ export const teamMembers = [
     id: 'member-3',
     name: 'Dara Mahmoudi',
     role: 'Flight Simulation Engineer | Backend Systems Engineer',
-    bio: 'Dara is part of the AdaptFlight team and is working on the AI flight simulation and Adaptflight backend systems. She helps develop the algorithms and models that enable the drone to respond to changing flight conditions. Dara has extensive knowledge about AI and machine learning.',
+    bio: 'Dara is part of the AdaptFlight team and is working on the AI flight simulation and Adaptflight backend systems. He helps develop the algorithms and models that enable the drone to respond to changing flight conditions. Dara has extensive knowledge about AI and machine learning.',
     photo: 'images/team/dara.jpg',
     alt: '',
   },
